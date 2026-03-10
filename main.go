@@ -303,16 +303,20 @@ func executeCLI(cmd *cobra.Command, src *source, w io.Writer) error {
 
 	content := string(b)
 	ext := filepath.Ext(src.URL)
-	if !isCode {
-		content = mermaid.RenderMarkdown(content, mermaid.Options{Width: int(width)}) //nolint:gosec
-	}
 	if isCode {
 		content = utils.WrapCodeBlock(string(b), ext)
 	}
-
-	out, err := r.Render(content)
-	if err != nil {
-		return fmt.Errorf("unable to render markdown: %w", err)
+	var out string
+	if isCode {
+		out, err = r.Render(content)
+		if err != nil {
+			return fmt.Errorf("unable to render markdown: %w", err)
+		}
+	} else {
+		out, err = mermaid.Render(content, mermaid.Options{Width: int(width)}, r.Render) //nolint:gosec
+		if err != nil {
+			return fmt.Errorf("unable to render markdown: %w", err)
+		}
 	}
 
 	// display

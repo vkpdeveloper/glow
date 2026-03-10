@@ -446,15 +446,18 @@ func glamourRender(m pagerModel, markdown string) (string, error) {
 		return "", fmt.Errorf("error creating glamour renderer: %w", err)
 	}
 
+	var out string
 	if isCode {
 		markdown = utils.WrapCodeBlock(markdown, filepath.Ext(m.currentDocument.Note))
+		out, err = r.Render(markdown)
+		if err != nil {
+			return "", fmt.Errorf("error rendering markdown: %w", err)
+		}
 	} else {
-		markdown = mermaid.RenderMarkdown(markdown, mermaid.Options{Width: width})
-	}
-
-	out, err := r.Render(markdown)
-	if err != nil {
-		return "", fmt.Errorf("error rendering markdown: %w", err)
+		out, err = mermaid.Render(markdown, mermaid.Options{Width: width}, r.Render)
+		if err != nil {
+			return "", fmt.Errorf("error rendering markdown: %w", err)
+		}
 	}
 
 	if isCode {

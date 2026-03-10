@@ -25,7 +25,7 @@ func TestRenderMarkdownReplacesMermaidFence(t *testing.T) {
 	if strings.Contains(output, "```mermaid") {
 		t.Fatalf("expected mermaid fence to be replaced, got %q", output)
 	}
-	if !strings.Contains(output, "┌") || !strings.Contains(output, "►") {
+	if !strings.Contains(output, "╭") || !strings.Contains(output, "►") {
 		t.Fatalf("expected rendered diagram output, got %q", output)
 	}
 	if !strings.Contains(output, "# Diagram") || !strings.Contains(output, "After") {
@@ -149,5 +149,62 @@ func TestRenderDiagramChoosesMoreCompactLayoutThanDefault(t *testing.T) {
 	}
 	if compactWidth > defaultWidth && compactHeight == defaultHeight {
 		t.Fatalf("expected compact render to reduce size, got compact=%dx%d default=%dx%d", compactWidth, compactHeight, defaultWidth, defaultHeight)
+	}
+}
+
+func TestRenderBypassesCodeFenceStylingForMermaid(t *testing.T) {
+	input := strings.Join([]string{
+		"# Diagram",
+		"",
+		"```mermaid",
+		"flowchart TD",
+		`A["Start"] --> B["Finish"]`,
+		"```",
+	}, "\n")
+
+	rendered, err := Render(input, Options{}, func(markdown string) (string, error) {
+		return markdown, nil
+	})
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	if strings.Contains(rendered, "```") {
+		t.Fatalf("expected mermaid diagram to bypass fenced code output, got %q", rendered)
+	}
+	for _, wanted := range []string{"# Diagram", "Start", "Finish", "╭"} {
+		if !strings.Contains(rendered, wanted) {
+			t.Fatalf("expected rendered output to contain %q, got %q", wanted, rendered)
+		}
+	}
+}
+
+func TestBeautifyDiagramSlimsBoxesAndConnectorRuns(t *testing.T) {
+	input := strings.Join([]string{
+		"┌──────────────────────┐",
+		"│                      │",
+		"│ Flutter capture flow │",
+		"│                      │",
+		"└───────────┬──────────┘",
+		"            │",
+		"            │",
+		"            ▼",
+		"╭──────────────────────╮",
+		"│  Media upload to R2  │",
+		"╰──────────────────────╯",
+	}, "\n")
+
+	output := beautifyDiagram(input)
+
+	if strings.Contains(output, "│                      │\n│ Flutter capture flow │\n│                      │") {
+		t.Fatalf("expected box padding rows to be removed, got %q", output)
+	}
+	if strings.Count(output, "\n            │\n") > 1 {
+		t.Fatalf("expected vertical connector run to be compressed, got %q", output)
+	}
+	for _, wanted := range []string{"╭──────────────────────╮", "│ Flutter capture flow │", "╰───────────┬──────────╯"} {
+		if !strings.Contains(output, wanted) {
+			t.Fatalf("expected beautified output to contain %q, got %q", wanted, output)
+		}
 	}
 }

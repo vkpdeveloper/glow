@@ -23,48 +23,60 @@ type fence struct {
 	info   string
 }
 
+type segment struct {
+	markdown string
+	diagram  string
+	indent   string
+}
+
 // RenderMarkdown replaces Mermaid fenced code blocks with terminal-friendly
 // diagram output wrapped in a plain code fence so Glamour can style it.
 func RenderMarkdown(markdown string, opts Options) string {
-	lines := strings.Split(markdown, "\n")
-	out := make([]string, 0, len(lines))
+	segments := splitMarkdown(markdown, opts)
+	lines := make([]string, 0, len(strings.Split(markdown, "\n")))
 
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		start, ok := parseFenceStart(line)
-		if !ok || !isMermaidFence(start.info) {
-			out = append(out, line)
+	for _, seg := range segments {
+		if seg.markdown != "" {
+			lines = append(lines, strings.Split(seg.markdown, "\n")...)
 			continue
 		}
-
-		end := -1
-		body := make([]string, 0, 16)
-		for j := i + 1; j < len(lines); j++ {
-			if isFenceEnd(lines[j], start) {
-				end = j
-				break
-			}
-			body = append(body, trimFenceIndent(lines[j], len(start.prefix)))
-		}
-
-		if end == -1 {
-			out = append(out, line)
-			continue
-		}
-
-		diagram, err := renderDiagram(strings.Join(body, "\n"), opts)
-		if err != nil {
-			log.Debug("unable to render mermaid block", "error", err)
-			out = append(out, lines[i:end+1]...)
-			i = end
-			continue
-		}
-
-		out = append(out, wrapRenderedDiagram(start, diagram)...)
-		i = end
+		lines = append(lines, wrapRenderedDiagram(fence{prefix: seg.indent, marker: '`', count: 3}, seg.diagram)...)
 	}
 
-	return strings.Join(out, "\n")
+	return strings.Join(lines, "\n")
+}
+
+// Render renders markdown with Mermaid blocks emitted as plain terminal output
+// so they bypass Glamour's code-block styling.
+func Render(markdown string, opts Options, renderMarkdown func(string) (string, error)) (string, error) {
+	segments := splitMarkdown(markdown, opts)
+
+	var out strings.Builder
+	for i, seg := range segments {
+		if seg.markdown != "" {
+			rendered, err := renderMarkdown(seg.markdown)
+			if err != nil {
+				return "", err
+			}
+			out.WriteString(rendered)
+			continue
+		}
+
+		if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") {
+			out.WriteByte('\n')
+		}
+		if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n\n") {
+			out.WriteByte('\n')
+		}
+
+		out.WriteString(indentDiagram(seg.diagram, seg.indent))
+
+		if i+1 < len(segments) && !strings.HasSuffix(out.String(), "\n\n") {
+			out.WriteString("\n\n")
+		}
+	}
+
+	return out.String(), nil
 }
 
 func renderDiagram(source string, opts Options) (string, error) {
@@ -85,7 +97,7 @@ func renderDiagram(source string, opts Options) (string, error) {
 			continue
 		}
 
-		rendered = strings.TrimRight(rendered, "\n")
+		rendered = beautifyDiagram(strings.TrimRight(rendered, "\n"))
 		score := renderScore(rendered, opts.Width)
 		if !haveBest || score < bestScore {
 			bestOutput = rendered
@@ -176,6 +188,218 @@ func trimFenceIndent(line string, indent int) string {
 		line = line[1:]
 	}
 	return line
+}
+
+func splitMarkdown(markdown string, opts Options) []segment {
+	lines := strings.Split(markdown, "\n")
+	segments := make([]segment, 0, 8)
+	markdownLines := make([]string, 0, len(lines))
+
+	flushMarkdown := func() {
+		if len(markdownLines) == 0 {
+			return
+		}
+		segments = append(segments, segment{markdown: strings.Join(markdownLines, "\n")})
+		markdownLines = markdownLines[:0]
+	}
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		start, ok := parseFenceStart(line)
+		if !ok || !isMermaidFence(start.info) {
+			markdownLines = append(markdownLines, line)
+			continue
+		}
+
+		end := -1
+		body := make([]string, 0, 16)
+		for j := i + 1; j < len(lines); j++ {
+			if isFenceEnd(lines[j], start) {
+				end = j
+				break
+			}
+			body = append(body, trimFenceIndent(lines[j], len(start.prefix)))
+		}
+
+		if end == -1 {
+			markdownLines = append(markdownLines, line)
+			continue
+		}
+
+		diagram, err := renderDiagram(strings.Join(body, "\n"), opts)
+		if err != nil {
+			log.Debug("unable to render mermaid block", "error", err)
+			markdownLines = append(markdownLines, lines[i:end+1]...)
+			i = end
+			continue
+		}
+
+		flushMarkdown()
+		segments = append(segments, segment{
+			diagram: diagram,
+			indent:  start.prefix,
+		})
+		i = end
+	}
+
+	flushMarkdown()
+	return segments
+}
+
+func indentDiagram(diagram, indent string) string {
+	if indent == "" || diagram == "" {
+		return diagram
+	}
+
+	lines := strings.Split(diagram, "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func beautifyDiagram(diagram string) string {
+	if diagram == "" {
+		return diagram
+	}
+
+	lines := strings.Split(diagram, "\n")
+	lines = slimBoxBands(lines)
+	lines = compressConnectorRows(lines, 1)
+
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(styleBoxCorners(line), unicode.IsSpace)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func slimBoxBands(lines []string) []string {
+	out := make([]string, 0, len(lines))
+
+	for i := 0; i < len(lines); {
+		if i+4 < len(lines) &&
+			isTopBorderBand(lines[i]) &&
+			isVerticalPaddingBand(lines[i+1]) &&
+			hasBoxTextBand(lines[i+2]) &&
+			isVerticalPaddingBand(lines[i+3]) &&
+			isBottomBorderBand(lines[i+4]) {
+			out = append(out,
+				styleTopBorder(lines[i]),
+				lines[i+2],
+				styleBottomBorder(lines[i+4]),
+			)
+			i += 5
+			continue
+		}
+
+		out = append(out, styleBoxCorners(lines[i]))
+		i++
+	}
+
+	return out
+}
+
+func compressConnectorRows(lines []string, maxRun int) []string {
+	out := make([]string, 0, len(lines))
+	run := 0
+
+	for _, line := range lines {
+		if isConnectorOnlyRow(line) {
+			if run < maxRun {
+				out = append(out, line)
+			}
+			run++
+			continue
+		}
+
+		run = 0
+		out = append(out, line)
+	}
+
+	return out
+}
+
+func styleBoxCorners(line string) string {
+	replacer := strings.NewReplacer(
+		"┌", "╭",
+		"┐", "╮",
+		"└", "╰",
+		"┘", "╯",
+	)
+	return replacer.Replace(line)
+}
+
+func styleTopBorder(line string) string {
+	return styleBoxCorners(line)
+}
+
+func styleBottomBorder(line string) string {
+	return styleBoxCorners(line)
+}
+
+func isTopBorderBand(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed != "" &&
+		strings.ContainsAny(trimmed, "┌+") &&
+		strings.ContainsAny(trimmed, "┐+") &&
+		!containsTextRune(trimmed)
+}
+
+func isBottomBorderBand(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed != "" &&
+		strings.ContainsAny(trimmed, "└+") &&
+		strings.ContainsAny(trimmed, "┘+") &&
+		!containsTextRune(trimmed)
+}
+
+func isVerticalPaddingBand(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || containsTextRune(trimmed) {
+		return false
+	}
+
+	for _, r := range trimmed {
+		if !strings.ContainsRune("│| ", r) {
+			return false
+		}
+	}
+
+	return strings.ContainsRune(trimmed, '│') || strings.ContainsRune(trimmed, '|')
+}
+
+func hasBoxTextBand(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+
+	return (strings.ContainsRune(trimmed, '│') || strings.ContainsRune(trimmed, '|')) && containsTextRune(trimmed)
+}
+
+func isConnectorOnlyRow(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || containsTextRune(trimmed) {
+		return false
+	}
+
+	for _, r := range trimmed {
+		if !strings.ContainsRune("│|", r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func containsTextRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func candidateConfigs(source string, opts Options) []*diagramconfig.Config {
