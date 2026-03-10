@@ -23,6 +23,9 @@ Use it to discover markdown files, read documentation directly on the command
 line. Glow will find local markdown files in subdirectories or a local
 Git repository.
 
+Glow also renders fenced `mermaid` diagrams directly in the terminal for
+supported flowcharts and sequence diagrams.
+
 ## Installation
 
 ### Package Manager
