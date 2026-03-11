@@ -209,7 +209,7 @@ mouse: true
 # use pager to display markdown
 pager: true
 # at which column should we word wrap?
-width: 80
+width: 150
 # show all files, including hidden and ignored.
 all: false
 # show line numbers (TUI-mode only)

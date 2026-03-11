@@ -190,7 +190,7 @@ func validateOptions(cmd *cobra.Command) error {
 		style = "notty"
 	}
 
-	// Detect terminal width
+	// Auto-size only when wrapping has been explicitly set to 0.
 	if !cmd.Flags().Changed("width") { //nolint:nestif
 		if isTerminal && width == 0 {
 			w, _, err := term.GetSize(int(os.Stdout.Fd()))
@@ -198,12 +198,12 @@ func validateOptions(cmd *cobra.Command) error {
 				width = uint(w) //nolint:gosec
 			}
 
-			if width > 120 {
-				width = 120
+			if width > 150 {
+				width = 150
 			}
 		}
 		if width == 0 {
-			width = 80
+			width = 150
 		}
 	}
 	return nil
@@ -406,7 +406,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&pager, "pager", "p", false, "display with pager")
 	rootCmd.Flags().BoolVarP(&tui, "tui", "t", false, "display with tui")
 	rootCmd.Flags().StringVarP(&style, "style", "s", styles.AutoStyle, "style name or JSON path")
-	rootCmd.Flags().UintVarP(&width, "width", "w", 0, "word-wrap at width (set to 0 to disable)")
+	rootCmd.Flags().UintVarP(&width, "width", "w", 150, "word-wrap at width (set to 0 to disable)")
 	rootCmd.Flags().BoolVarP(&showAllFiles, "all", "a", false, "show system files and directories (TUI-mode only)")
 	rootCmd.Flags().BoolVarP(&showLineNumbers, "line-numbers", "l", false, "show line numbers (TUI-mode only)")
 	rootCmd.Flags().BoolVarP(&preserveNewLines, "preserve-new-lines", "n", false, "preserve newlines in the output")
@@ -425,7 +425,7 @@ func init() {
 	_ = viper.BindPFlag("all", rootCmd.Flags().Lookup("all"))
 
 	viper.SetDefault("style", styles.AutoStyle)
-	viper.SetDefault("width", 0)
+	viper.SetDefault("width", 150)
 	viper.SetDefault("all", true)
 
 	rootCmd.AddCommand(configCmd, manCmd)
